@@ -1,44 +1,15 @@
 pipeline {
     agent any
-    
-    tools {
-        maven 'M2_HOME'
-    }
-    
-    options {
-        // Timeout counter starts after agent is allocated
-        timeout(time: 1, unit: 'SECONDS')
-    }
-    
-    environment {
-        APP_ENV = "DEV"
-    }
-    
     stages {
-        stage('Code Checkout') {
+        stage('Check Tools') {
             steps {
-                git branch: 'master',
-                url: 'https://github.com/hwafa/atelier-jenkins.git',
-                credentialsId: 'jenkins-example-github-pat'
+                sh '''
+                    echo "Checking for Maven..."
+                    which mvn || echo "mvn not found"
+                    ls -la /opt/ || echo "/opt not accessible"
+                    ls -la /usr/local/ || echo "/usr/local not accessible"
+                '''
             }
-        }
-        
-        stage('Code Build') {
-            steps {
-                sh 'mvn install -Dmaven.test.skip=true'
-            }
-        }
-    }
-    
-    post {
-        always {
-            echo "======always======"
-        }
-        success {
-            echo "=====pipeline executed successfully ====="
-        }
-        failure {
-            echo "======pipeline execution failed======"
         }
     }
 }
