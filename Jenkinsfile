@@ -21,8 +21,7 @@ pipeline {
                     branches: [[name: '*/springLearningProject']],
                     extensions: [
                         [$class: 'CleanCheckout'],
-                        [$class: 'CloneOption', depth: 1, shallow: true],
-                        [$class: 'LocalBranch', localBranch: '**']
+                        [$class: 'CloneOption', depth: 1, shallow: true]
                     ],
                     userRemoteConfigs: [[
                         url: 'https://github.com/contactkmitiyahya-dev/springboot',
@@ -52,14 +51,14 @@ pipeline {
                                 echo ""
                                 echo "Commit #${commitCount}:"
                                 echo "  Commit ID: ${entry.commitId}"
-                                echo "  Author: ${entry.author} (${entry.authorEmail})"
+                                echo "  Author: ${entry.author}"
                                 echo "  Date: ${new Date(entry.timestamp)}"
                                 echo "  Message: ${entry.msg}"
                                 
                                 if (!entry.affectedFiles.isEmpty()) {
                                     echo "  Changed files:"
                                     for (file in entry.affectedFiles) {
-                                        echo "    - ${file.path} (${file.editType.name})"
+                                        echo "    - ${file.path}"
                                     }
                                 }
                                 echo "----------------------------------------"
@@ -72,12 +71,6 @@ pipeline {
         }
         
         stage('Code Build') {
-            when {
-                expression { 
-                    // Only run build if there are changes OR if it's a manual trigger
-                    !currentBuild.changeSets.isEmpty() || currentBuild.getBuildCauses()[0].toString().contains('UserIdCause')
-                }
-            }
             steps {
                 sh '''
                     if [ -f "pom.xml" ]; then
@@ -96,21 +89,12 @@ pipeline {
     post {
         always {
             echo "====== Pipeline completed ======"
-            script {
-                def changeLogSets = currentBuild.changeSets
-                if (!changeLogSets.isEmpty()) {
-                    echo "Build triggered by ${changeLogSets.size()} change set(s)"
-                }
-            }
         }
         success {
             echo "===== Pipeline executed successfully ====="
         }
         failure {
             echo "====== Pipeline execution failed ====="
-        }
-        changed {
-            echo "====== Build status changed ======"
         }
     }
 }
