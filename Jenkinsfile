@@ -1,6 +1,10 @@
 pipeline {
     agent any
     
+    triggers {
+        pollSCM('H/5 * * * *')  // Poll Git every 5 minutes for changes
+    }
+    
     options {
         timeout(time: 5, unit: 'MINUTES')
     }
@@ -12,16 +16,72 @@ pipeline {
     stages {
         stage('Code Checkout') {
             steps {
-                git branch: 'springLearningProject',
-                url: 'https://github.com/contactkmitiyahya-dev/springboot',
-                credentialsId: '9d302f79-f34b-450c-89b4-37bd25e34a71'
+                checkout([
+                    $class: 'GitSCM',
+                    branches: [[name: '*/springLearningProject']],
+                    extensions: [
+                        [$class: 'CleanCheckout'],
+                        [$class: 'CloneOption', depth: 1, shallow: true],
+                        [$class: 'LocalBranch', localBranch: '**']
+                    ],
+                    userRemoteConfigs: [[
+                        url: 'https://github.com/contactkmitiyahya-dev/springboot',
+                        credentialsId: '9d302f79-f34b-450c-89b4-37bd25e34a71'
+                    ]]
+                ])
+            }
+        }
+        
+        stage('Display Changes') {
+            steps {
+                script {
+                    echo "=== Recent Changes in Git Repository ==="
+                    
+                    // Get the change log
+                    def changeLogSets = currentBuild.changeSets
+                    
+                    if (changeLogSets.isEmpty()) {
+                        echo "No changes detected since last build"
+                    } else {
+                        echo "Changes detected! Total change sets: ${changeLogSets.size()}"
+                        
+                        int commitCount = 0
+                        for (changeLogSet in changeLogSets) {
+                            for (entry in changeLogSet.items) {
+                                commitCount++
+                                echo ""
+                                echo "Commit #${commitCount}:"
+                                echo "  Commit ID: ${entry.commitId}"
+                                echo "  Author: ${entry.author} (${entry.authorEmail})"
+                                echo "  Date: ${new Date(entry.timestamp)}"
+                                echo "  Message: ${entry.msg}"
+                                
+                                if (!entry.affectedFiles.isEmpty()) {
+                                    echo "  Changed files:"
+                                    for (file in entry.affectedFiles) {
+                                        echo "    - ${file.path} (${file.editType.name})"
+                                    }
+                                }
+                                echo "----------------------------------------"
+                            }
+                        }
+                        echo "Total commits in this build: ${commitCount}"
+                    }
+                }
             }
         }
         
         stage('Code Build') {
+            when {
+                expression { 
+                    // Only run build if there are changes OR if it's a manual trigger
+                    !currentBuild.changeSets.isEmpty() || currentBuild.getBuildCauses()[0].toString().contains('UserIdCause')
+                }
+            }
             steps {
                 sh '''
                     if [ -f "pom.xml" ]; then
+                        echo "Building Maven project..."
                         mvn clean install -DskipTests
                     else
                         echo "No pom.xml found"
@@ -36,12 +96,21 @@ pipeline {
     post {
         always {
             echo "====== Pipeline completed ======"
+            script {
+                def changeLogSets = currentBuild.changeSets
+                if (!changeLogSets.isEmpty()) {
+                    echo "Build triggered by ${changeLogSets.size()} change set(s)"
+                }
+            }
         }
         success {
             echo "===== Pipeline executed successfully ====="
         }
         failure {
             echo "====== Pipeline execution failed ====="
+        }
+        changed {
+            echo "====== Build status changed ======"
         }
     }
 }
