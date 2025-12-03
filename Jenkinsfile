@@ -140,7 +140,10 @@ pipeline {
                         echo ""
                         echo "=== BUILD ARTIFACTS ==="
                         if [ -d "target" ]; then
-                            find target -name "*.jar" -type f -exec echo "📦 {}" \;
+                            # List JAR files without using -exec to avoid escaping issues
+                            for jar in $(find target -name "*.jar" -type f); do
+                                echo "📦 $jar"
+                            done
                             JAR_COUNT=$(find target -name "*.jar" -type f | wc -l)
                             echo "Total JAR files: ${JAR_COUNT}"
                         else
@@ -175,7 +178,8 @@ pipeline {
                     if [ -f "target/testProject-0.0.1-SNAPSHOT.jar" ]; then
                         JAR_SIZE=$(stat -c%s "target/testProject-0.0.1-SNAPSHOT.jar")
                         echo "Main JAR created: target/testProject-0.0.1-SNAPSHOT.jar"
-                        echo "JAR size: ${JAR_SIZE} bytes ($((${JAR_SIZE}/1024/1024)) MB)"
+                        echo "JAR size: ${JAR_SIZE} bytes"
+                        echo "JAR size: $((${JAR_SIZE}/1024/1024)) MB"
                     else
                         echo "Warning: Expected JAR not found in target/"
                     fi
