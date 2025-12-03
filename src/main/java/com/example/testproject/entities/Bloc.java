@@ -16,6 +16,7 @@ public class Bloc {
     @JsonIgnore
     private Set<Chambre> chambreSet;
 
+    //bloc file
     @ManyToOne
     private Foyer foyer;
 
