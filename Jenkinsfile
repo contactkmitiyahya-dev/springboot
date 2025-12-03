@@ -37,160 +37,128 @@ pipeline {
                 script {
                     echo "=== GIT REPOSITORY ANALYSIS ==="
 
-                    // Get build causes safely
-                    def causes = []
-                    currentBuild.rawBuild.getCauses().each { cause ->
-                        causes.add(cause.getShortDescription())
-                    }
-                    echo "Build triggered by: ${causes.join(', ')}"
+                    // Simple build trigger detection (no restricted methods)
+                    echo "Build Number: ${BUILD_NUMBER}"
+                    echo "Build URL: ${BUILD_URL}"
 
-                    // Use shell commands to analyze Git instead of Java objects
-                    sh '''
-                        echo "=== Git Status Analysis ==="
-
-                        # Check current commit
-                        CURRENT_COMMIT=$(git rev-parse --short HEAD)
-                        echo "Current Commit: ${CURRENT_COMMIT}"
-
-                        # Get last commit message
-                        LAST_COMMIT_MSG=$(git log -1 --pretty=format:"%s")
-                        LAST_COMMIT_AUTHOR=$(git log -1 --pretty=format:"%an")
-                        LAST_COMMIT_DATE=$(git log -1 --pretty=format:"%cd" --date=format:"%Y-%m-%d %H:%M:%S")
-                        echo "Last Commit: ${LAST_COMMIT_MSG}"
-                        echo "Author: ${LAST_COMMIT_AUTHOR}"
-                        echo "Date: ${LAST_COMMIT_DATE}"
-
-                        # Check if there are new commits since last build
-                        echo ""
-                        echo "=== Change Detection ==="
-                        if [ -f ".git/last_build_commit" ]; then
-                            LAST_BUILD_COMMIT=$(cat .git/last_build_commit)
-                            echo "Previous build commit: ${LAST_BUILD_COMMIT}"
-                            echo "Current build commit: ${CURRENT_COMMIT}"
-
-                            if [ "${LAST_BUILD_COMMIT}" != "${CURRENT_COMMIT}" ]; then
-                                echo "✅ NEW COMMITS DETECTED (PUSH operation)"
-                                echo "Changes since last build:"
-                                git log --oneline ${LAST_BUILD_COMMIT}..${CURRENT_COMMIT} 2>/dev/null || echo "Could not get diff (maybe first build)"
-
-                                # Show changed files
-                                echo ""
-                                echo "Changed files in latest commit:"
-                                git diff-tree --no-commit-id --name-only -r ${CURRENT_COMMIT}
-                            else
-                                echo "🔄 SAME COMMIT (PULL/REBUILD operation)"
-                            fi
-                        else
-                            echo "📋 FIRST BUILD or no previous commit info"
-                            echo "Operation: Initial checkout or manual trigger"
-                        fi
-
-                        # Save current commit for next build
-                        echo "${CURRENT_COMMIT}" > .git/last_build_commit
-
-                        # Get branch info
-                        echo ""
-                        echo "=== Branch Information ==="
-                        git branch -a | grep "*" || echo "Detached HEAD"
-                        git remote -v
-
-                        # Get commit stats
-                        echo ""
-                        echo "=== Repository Stats ==="
-                        TOTAL_COMMITS=$(git rev-list --count HEAD)
-                        echo "Total commits: ${TOTAL_COMMITS}"
-
-                        # Last 3 commits
-                        echo ""
-                        echo "Last 3 commits:"
-                        git log --oneline -3
-                    '''
-
-                    // Simple change detection without serialization issues
-                    try {
-                        def changeLogSets = currentBuild.changeSets
-                        if (changeLogSets && !changeLogSets.isEmpty()) {
-                            echo "📥 Git Operation: PUSH detected (through Jenkins API)"
-                        } else {
-                            echo "🔄 Git Operation: PULL/REBUILD/MANUAL detected"
-                        }
-                    } catch (Exception e) {
-                        echo "⚠️ Could not analyze changes via API: ${e.message}"
+                    // Check if this is a manual trigger
+                    def isManual = currentBuild.getBuildCauses().toString().contains('UserIdCause')
+                    if (isManual) {
+                        echo "Trigger: MANUAL (User clicked Build Now)"
+                    } else {
+                        echo "Trigger: AUTOMATIC (SCM polling or webhook)"
                     }
                 }
+
+                sh '''
+                    echo "=== Git Change Detection ==="
+
+                    # Get current commit info
+                    CURRENT_COMMIT=$(git rev-parse --short HEAD)
+                    LAST_COMMIT_MSG=$(git log -1 --pretty=format:"%s")
+                    LAST_COMMIT_AUTHOR=$(git log -1 --pretty=format:"%an")
+
+                    echo "Current Commit: ${CURRENT_COMMIT}"
+                    echo "Last Commit Message: ${LAST_COMMIT_MSG}"
+                    echo "Last Commit Author: ${LAST_COMMIT_AUTHOR}"
+                    echo "Commit Date: $(git log -1 --pretty=format:"%cd" --date=format:"%Y-%m-%d %H:%M:%S")"
+
+                    # Check for new commits since last build
+                    echo ""
+                    echo "=== PUSH vs PULL Detection ==="
+                    if [ -f ".git/last_build_commit" ]; then
+                        LAST_BUILD_COMMIT=$(cat .git/last_build_commit)
+                        echo "Previous build commit: ${LAST_BUILD_COMMIT}"
+                        echo "Current build commit: ${CURRENT_COMMIT}"
+
+                        if [ "${LAST_BUILD_COMMIT}" = "${CURRENT_COMMIT}" ]; then
+                            echo "🔁 Operation: PULL/REBUILD (same commit)"
+                            echo "This is likely a rebuild or manual trigger"
+                        else
+                            echo "🚀 Operation: PUSH (new commits detected)"
+                            echo ""
+                            echo "New commits since last build:"
+                            git log --oneline ${LAST_BUILD_COMMIT}..${CURRENT_COMMIT} 2>/dev/null || echo "First time comparing commits"
+
+                            echo ""
+                            echo "Files changed in latest commit:"
+                            git diff-tree --no-commit-id --name-only -r ${CURRENT_COMMIT} 2>/dev/null || echo "Could not get file list"
+                        fi
+                    else
+                        echo "📋 First build or no previous commit record"
+                        echo "Operation: INITIAL CHECKOUT"
+                    fi
+
+                    # Save current commit for next comparison
+                    echo "${CURRENT_COMMIT}" > .git/last_build_commit
+
+                    # Show branch info
+                    echo ""
+                    echo "=== Repository Info ==="
+                    echo "Branch: $(git branch --show-current 2>/dev/null || echo 'detached HEAD')"
+                    echo "Remote: $(git remote -v | head -1)"
+                    echo "Total commits: $(git rev-list --count HEAD)"
+
+                    # Show recent commits
+                    echo ""
+                    echo "Recent commits (last 5):"
+                    git log --oneline -5
+                '''
             }
         }
 
         stage('Build & Test') {
             steps {
-                script {
-                    echo "=== BUILDING PROJECT ==="
-                    echo "Build Number: ${BUILD_NUMBER}"
-                    echo "Build URL: ${BUILD_URL}"
-                }
-
                 sh '''
-                    if [ -f "pom.xml" ]; then
-                        echo "🚀 Building Spring Boot application..."
-                        echo "Build started at: $(date)"
+                    echo "=== BUILD STARTING ==="
+                    echo "Build time: $(date)"
 
+                    if [ -f "pom.xml" ]; then
+                        echo "Building Spring Boot application..."
                         mvn clean install -DskipTests
 
-                        # Show build artifacts
+                        # List created artifacts
                         echo ""
                         echo "=== BUILD ARTIFACTS ==="
                         if [ -d "target" ]; then
-                            # List JAR files without using -exec to avoid escaping issues
-                            for jar in $(find target -name "*.jar" -type f); do
-                                echo "📦 $jar"
-                            done
-                            JAR_COUNT=$(find target -name "*.jar" -type f | wc -l)
-                            echo "Total JAR files: ${JAR_COUNT}"
+                            JAR_FILES=$(find target -name "*.jar" -type f | wc -l)
+                            if [ ${JAR_FILES} -gt 0 ]; then
+                                echo "Found ${JAR_FILES} JAR file(s):"
+                                find target -name "*.jar" -type f -printf "  📦 %p\\n"
+                            else
+                                echo "No JAR files found in target/"
+                            fi
                         else
-                            echo "No target directory found"
+                            echo "Target directory not found"
                         fi
                     else
-                        echo "❌ ERROR: pom.xml not found!"
-                        echo "Current directory contents:"
+                        echo "ERROR: pom.xml not found!"
                         ls -la
                         exit 1
                     fi
                 '''
             }
-
-            post {
-                success {
-                    echo "✅ BUILD SUCCESSFUL"
-                }
-                failure {
-                    echo "❌ BUILD FAILED"
-                }
-            }
         }
 
-        stage('Post Build Analysis') {
+        stage('Post Build') {
             steps {
                 sh '''
-                    echo "=== POST-BUILD ANALYSIS ==="
-                    echo "Build completed at: $(date)"
+                    echo "=== BUILD COMPLETED ==="
+                    echo "Completion time: $(date)"
 
-                    # Check if build created expected files
-                    if [ -f "target/testProject-0.0.1-SNAPSHOT.jar" ]; then
-                        JAR_SIZE=$(stat -c%s "target/testProject-0.0.1-SNAPSHOT.jar")
-                        echo "Main JAR created: target/testProject-0.0.1-SNAPSHOT.jar"
-                        echo "JAR size: ${JAR_SIZE} bytes"
-                        echo "JAR size: $((${JAR_SIZE}/1024/1024)) MB"
-                    else
-                        echo "Warning: Expected JAR not found in target/"
-                    fi
+                    # Create build summary
+                    echo "=== BUILD SUMMARY ===" > build_summary.txt
+                    echo "Project: $(basename $(pwd))" >> build_summary.txt
+                    echo "Build: ${BUILD_NUMBER}" >> build_summary.txt
+                    echo "Commit: $(git rev-parse --short HEAD)" >> build_summary.txt
+                    echo "Status: ${BUILD_RESULT:-UNKNOWN}" >> build_summary.txt
+                    echo "Timestamp: $(date)" >> build_summary.txt
 
-                    # Save build info
-                    echo "BUILD_INFO" > build_info.txt
-                    echo "Timestamp: $(date)" >> build_info.txt
-                    echo "Commit: $(git rev-parse --short HEAD)" >> build_info.txt
-                    echo "Branch: $(git branch --show-current 2>/dev/null || echo 'detached')" >> build_info.txt
-                    echo "Build Number: ${BUILD_NUMBER}" >> build_info.txt
+                    cat build_summary.txt
                 '''
+
+                // Save build info
+                archiveArtifacts artifacts: 'build_summary.txt, target/*.jar', fingerprint: true
             }
         }
     }
@@ -199,22 +167,26 @@ pipeline {
         always {
             echo "====== PIPELINE COMPLETED ======"
             script {
-                def duration = currentBuild.durationString
-                echo "Total Duration: ${duration}"
-                echo "Final Result: ${currentBuild.currentResult}"
+                echo "Duration: ${currentBuild.durationString}"
+                echo "Result: ${currentBuild.currentResult}"
 
-                // Archive artifacts
-                archiveArtifacts artifacts: 'target/*.jar, build_info.txt', fingerprint: true
-
-                // Clean up
-                sh 'rm -f build_info.txt 2>/dev/null || true'
+                // Cleanup
+                sh 'rm -f build_summary.txt 2>/dev/null || true'
             }
         }
         success {
-            echo "🎉 ===== PIPELINE SUCCESS ====="
+            echo "✅ ===== PIPELINE SUCCESS ====="
+            script {
+                // Success actions
+                echo "Build ${BUILD_NUMBER} completed successfully!"
+            }
         }
         failure {
-            echo "💥 ===== PIPELINE FAILED ====="
+            echo "❌ ===== PIPELINE FAILED ====="
+            script {
+                // Failure actions
+                echo "Build ${BUILD_NUMBER} failed!"
+            }
         }
         changed {
             echo "🔄 ===== STATUS CHANGED ====="
