@@ -18,6 +18,9 @@ pipeline {
         stage('Docker Build & Push') {
             steps {
                 dir('testProject') {
+                sh 'pwd'  // Affiche le répertoire actuel
+                                sh 'ls -la'  // Liste tous les fichiers
+                                sh 'find . -name "pom.xml"'
                     sh '''
                         echo "Login avec $DOCKERHUB_USR ..."
                         echo "$DOCKERHUB_PSW" | docker login -u "$DOCKERHUB_USR" --password-stdin
