@@ -1,47 +1,98 @@
 pipeline {
     agent any
 
+    tools {
+        maven 'M2_HOME'
+    }
+
     environment {
-        DOCKERHUB = credentials('DOCKERHUB')
+        DOCKER_REGISTRY = 'docker.io' // Modifier selon votre registre (docker.io pour Docker Hub)
+        IMAGE_NAME = 'kmitiyahya/student-management'
+        IMAGE_TAG = "${env.BUILD_NUMBER}"
+        PUSH_DOCKER = 'true' // Mettre à 'true' pour activer le push Docker (nécessite credentials)
+    }
+
+    triggers {
+        // Vérifie les changements Git toutes les minutes
+        // Le pipeline se déclenchera automatiquement à chaque nouveau commit
+         // Le pipeline se déclenchera automatiquement à chaque nouveau commit
+        pollSCM('* * * * *')
     }
 
     stages {
-        stage('Checkout & Build') {
+        stage('GIT - Récupération du code') {
             steps {
-                git branch: 'springLearningProject', url: 'https://github.com/contactkmitiyahya-dev/springboot.git'
-
-                // Commandes de debug
-                sh 'echo "=== CONTENU DU RÉPERTOIRE ==="'
-                sh 'ls -la'
-                sh 'echo "=== RECHERCHE DU POM.XML ==="'
-                sh 'find . -name "pom.xml"'
-
-                // Build Maven (sans dir)
-                sh 'mvn clean install -DskipTests'
+                script {
+                    echo 'Récupération des dernières mises à jour du dépôt Git...'
+                }
+                // Utilise checkout scm car le pipeline est configuré avec "Pipeline script from SCM"
+                checkout scm
             }
         }
 
-        stage('Docker Build & Push') {
+        stage('Build Maven - Nettoyage et Construction') {
             steps {
-                sh '''
-                    echo "Login avec $DOCKERHUB_USR ..."
-                    echo "$DOCKERHUB_PSW" | docker login -u "$DOCKERHUB_USR" --password-stdin
+                script {
+                    echo 'Nettoyage et reconstruction du projet Maven...'
+                    // Skip tests car MySQL n'est pas disponible dans l'environnement Jenkins
+                    sh 'mvn clean package -DskipTests'
+                }
+            }
+            post {
+                success {
+                    echo 'Build Maven réussi!'
+                    archiveArtifacts artifacts: 'target/*.jar', fingerprint: true
+                }
+                failure {
+                    echo 'Échec du build Maven!'
+                }
+            }
+        }
 
-                    docker build -t kmitiyahya/springprojecttest:latest .
-                    docker push kmitiyahya/springprojecttest:latest
+        stage('Build Image Docker') {
+            steps {
+                script {
+                    def imageTag = "${IMAGE_NAME}:${IMAGE_TAG}"
+                    def latestTag = "${IMAGE_NAME}:latest"
 
-                    echo "IMAGE PUBLIÉE → https://hub.docker.com/r/kmitiyahya/springprojecttest"
-                '''
+                    echo "Construction de l'image Docker: ${imageTag}"
+                    sh "docker build -t ${imageTag} -t ${latestTag} ."
+                }
+            }
+        }
+
+        stage('Push Image Docker') {
+            when {
+                expression { env.PUSH_DOCKER == 'true' }
+            }
+            steps {
+                script {
+                    echo "Publication de l'image Docker dans le registre..."
+                    withCredentials([usernamePassword(credentialsId: 'docker-registry-credentials',
+                                                     usernameVariable: 'DOCKER_USER',
+                                                     passwordVariable: 'DOCKER_PASS')]) {
+                        sh "echo ${DOCKER_PASS} | docker login ${DOCKER_REGISTRY} -u ${DOCKER_USER} --password-stdin"
+
+                        def imageTag = "${IMAGE_NAME}:${IMAGE_TAG}"
+                        def latestTag = "${IMAGE_NAME}:latest"
+
+                        sh "docker push ${imageTag}"
+                        sh "docker push ${latestTag}"
+                    }
+                }
             }
         }
     }
 
     post {
         success {
-            echo 'Pipeline terminé avec succès !'
+            echo 'Pipeline exécuté avec succès!'
         }
         failure {
-            echo 'Le pipeline a échoué.'
+            echo 'Pipeline échouée!'
+        }
+        always {
+            cleanWs()
         }
     }
 }
